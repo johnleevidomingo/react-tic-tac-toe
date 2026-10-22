@@ -5,8 +5,8 @@ import {
   findBestMove,
   isBoardFull,
   isGameOver,
-  nextPlayer,
   otherPlayer,
+  resizeBoard,
   winLength,
 } from './gameLogic';
 
@@ -88,9 +88,13 @@ function BoardSizeForm({ rows, cols, onResize }) {
           onChange={(event) => setDraftCols(event.target.value)}
         />
       </label>
-      <button type="submit">New board</button>
+      <button type="submit">Resize board</button>
     </form>
   );
+}
+
+function newGame(rows, cols) {
+  return { squares: createBoard(rows, cols), rows, cols, next: 'X' };
 }
 
 function SwitchPlayerButton({ humanPlayer, disabled, onSwitch }) {
@@ -102,18 +106,23 @@ function SwitchPlayerButton({ humanPlayer, disabled, onSwitch }) {
 }
 
 export default function Game() {
-  // Each history entry is a board and its size, after one of your actions (a move or a switch)
-  // plus the computer's reply, or after one computer move while it plays itself.
-  const [history, setHistory] = useState([{ squares: createBoard(3, 3), rows: 3, cols: 3 }]);
+  // Each history entry is a board, its size and whose turn it is, after one of your actions
+  // (a move, a switch or a resize) plus the computer's reply, or after one computer move while it plays itself.
+  // The turn is stored rather than worked out from the marks, because a resize can drop marks off the board.
+  const [history, setHistory] = useState([newGame(3, 3)]);
   const [currentMove, setCurrentMove] = useState(0);
   // The side you control. The computer always plays the other side.
   const [humanPlayer, setHumanPlayer] = useState('X');
   const [autoPlaying, setAutoPlaying] = useState(false);
-  const { squares: currentSquares, rows, cols } = history[currentMove];
+  const { squares: currentSquares, rows, cols, next } = history[currentMove];
   const gameOver = isGameOver(currentSquares, rows, cols);
 
-  function handlePlay(nextSquares) {
-    const nextHistory = [...history.slice(0, currentMove + 1), { squares: nextSquares, rows, cols }];
+  function handlePlay(nextSquares, nextTurn) {
+    addToHistory({ squares: nextSquares, rows, cols, next: nextTurn });
+  }
+
+  function addToHistory(entry) {
+    const nextHistory = [...history.slice(0, currentMove + 1), entry];
     setHistory(nextHistory);
     setCurrentMove(nextHistory.length - 1);
   }
@@ -124,13 +133,15 @@ export default function Game() {
     }
     const nextSquares = currentSquares.slice();
     nextSquares[i] = humanPlayer;
+    const computer = otherPlayer(humanPlayer);
 
     // The computer answers for the other side, unless your move ended the game.
-    if (!isGameOver(nextSquares, rows, cols)) {
-      const computer = otherPlayer(humanPlayer);
+    if (isGameOver(nextSquares, rows, cols)) {
+      handlePlay(nextSquares, computer);
+    } else {
       nextSquares[findBestMove(nextSquares, rows, cols, computer)] = computer;
+      handlePlay(nextSquares, humanPlayer);
     }
-    handlePlay(nextSquares);
   }
 
   // The computer makes the best move for your side, then you take over the other side.
@@ -141,7 +152,7 @@ export default function Game() {
     const nextSquares = currentSquares.slice();
     nextSquares[findBestMove(nextSquares, rows, cols, humanPlayer)] = humanPlayer;
     setHumanPlayer(otherPlayer(humanPlayer));
-    handlePlay(nextSquares);
+    handlePlay(nextSquares, otherPlayer(humanPlayer));
   }
 
   // While autoplay is on, the computer makes one move for whoever is next every AUTOPLAY_DELAY_MS.
@@ -151,14 +162,13 @@ export default function Game() {
     }
     if (gameOver) {
       setAutoPlaying(false);
-      setHumanPlayer(nextPlayer(currentSquares));
+      setHumanPlayer(next);
       return;
     }
     const timer = setTimeout(() => {
-      const player = nextPlayer(currentSquares);
       const nextSquares = currentSquares.slice();
-      nextSquares[findBestMove(nextSquares, rows, cols, player)] = player;
-      handlePlay(nextSquares);
+      nextSquares[findBestMove(nextSquares, rows, cols, next)] = next;
+      handlePlay(nextSquares, otherPlayer(next));
     }, AUTOPLAY_DELAY_MS);
     return () => clearTimeout(timer);
   });
@@ -166,28 +176,36 @@ export default function Game() {
   function toggleAutoPlay() {
     if (autoPlaying) {
       // Stopping hands you whichever side is due to move.
-      setHumanPlayer(nextPlayer(currentSquares));
+      setHumanPlayer(next);
     }
     setAutoPlaying(!autoPlaying);
   }
 
-  // Changing the board size starts a new game on the new board.
+  // Resizing keeps the game going: every mark stays at its row and column, marks that no longer
+  // fit are dropped, and it is still the same player's turn. Autoplay keeps running on the new board.
+  // The resize is its own history step, so time travel can undo it.
   function handleResize(nextRows, nextCols) {
-    setHistory([{ squares: createBoard(nextRows, nextCols), rows: nextRows, cols: nextCols }]);
-    setCurrentMove(0);
-    setHumanPlayer('X');
-    setAutoPlaying(false);
+    if (nextRows === rows && nextCols === cols) {
+      return;
+    }
+    addToHistory({
+      squares: resizeBoard(currentSquares, rows, cols, nextRows, nextCols),
+      rows: nextRows,
+      cols: nextCols,
+      next,
+      resized: true,
+    });
   }
 
   function jumpTo(nextMove) {
     setCurrentMove(nextMove);
     setAutoPlaying(false);
     // After time travel you control whichever side is due to move.
-    setHumanPlayer(nextPlayer(history[nextMove].squares));
+    setHumanPlayer(history[nextMove].next);
   }
 
   function handleReset() {
-    setHistory([{ squares: createBoard(rows, cols), rows, cols }]);
+    setHistory([newGame(rows, cols)]);
     setCurrentMove(0);
     setHumanPlayer('X');
     setAutoPlaying(false);
@@ -200,14 +218,16 @@ export default function Game() {
   } else if (isBoardFull(currentSquares)) {
     status = 'Draw';
   } else if (autoPlaying) {
-    status = 'Computer is playing ' + nextPlayer(currentSquares);
+    status = 'Computer is playing ' + next;
   } else {
     status = 'Your move (' + humanPlayer + ')';
   }
 
   const moves = history.map((entry, move) => {
     let description;
-    if (move > 0) {
+    if (entry.resized) {
+      description = 'Go to move #' + move + ' (resized to ' + entry.rows + ' × ' + entry.cols + ')';
+    } else if (move > 0) {
       description = 'Go to move #' + move;
     } else {
       description = 'Go to game start';
@@ -231,7 +251,8 @@ export default function Game() {
         />
       </div>
       <div className="game-info">
-        <BoardSizeForm rows={rows} cols={cols} onResize={handleResize} />
+        {/* The key resets the inputs when time travel lands on a board of another size. */}
+        <BoardSizeForm key={rows + 'x' + cols} rows={rows} cols={cols} onResize={handleResize} />
         <p className="rule">
           {rows} × {cols} board: {winLength(rows, cols)} in a row wins.
         </p>

@@ -6,6 +6,18 @@ export function createBoard(rows, cols) {
   return Array(rows * cols).fill(null);
 }
 
+// Copies a board onto a board of a new size. Each mark keeps its row and column;
+// marks outside the new size are dropped and new squares start empty.
+export function resizeBoard(squares, rows, cols, nextRows, nextCols) {
+  const next = createBoard(nextRows, nextCols);
+  for (let row = 0; row < Math.min(rows, nextRows); row++) {
+    for (let col = 0; col < Math.min(cols, nextCols); col++) {
+      next[row * nextCols + col] = squares[row * cols + col];
+    }
+  }
+  return next;
+}
+
 export function winLength(rows, cols) {
   return Math.min(rows, cols);
 }
