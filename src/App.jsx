@@ -94,22 +94,18 @@ export default function Game() {
   );
 }
 
+// Matches any win in the 9-character board string (rows, columns, both diagonals).
+// Empty squares are written as '-' so every square takes exactly one character.
+const re = /^(?:(?:...){0,2}([OX])\1\1|.{0,2}([OX])..\2..\2|([OX])...\3...\3|..([OX]).\4.\4)/g;
+
 function calculateWinner(squares) {
-  const lines = [
-    [0, 1, 2],
-    [3, 4, 5],
-    [6, 7, 8],
-    [0, 3, 6],
-    [1, 4, 7],
-    [2, 5, 8],
-    [0, 4, 8],
-    [2, 4, 6],
-  ];
-  for (let i = 0; i < lines.length; i++) {
-    const [a, b, c] = lines[i];
-    if (squares[a] && squares[a] === squares[b] && squares[a] === squares[c]) {
-      return squares[a];
-    }
+  const board = squares.map((square) => square ?? '-').join('');
+  // The g flag makes re remember where its last match ended, so reset it before each use.
+  re.lastIndex = 0;
+  const match = re.exec(board);
+  if (!match) {
+    return null;
   }
-  return null;
+  // Exactly one of the four capture groups is filled: the winning player.
+  return match[1] || match[2] || match[3] || match[4];
 }
