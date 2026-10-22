@@ -167,32 +167,51 @@ export function nextPlayer(squares) {
   return xCount === oCount ? 'X' : 'O';
 }
 
-// Returns an open square that would win the game for player, or -1 if there is none.
-function findWinningMove(squares, player) {
-  for (let i = 0; i < squares.length; i++) {
-    if (squares[i] === null) {
-      const trial = squares.slice();
-      trial[i] = player;
-      if (calculateWinner(trial) === player) {
-        return i;
+// Scores a board from X's point of view: positive means X wins, negative means O wins, 0 is a draw.
+// Faster wins (smaller depth) score higher, so the computer finishes a won game instead of stalling.
+export function minimax(board, depth, isMaximizing) {
+  const winner = calculateWinner(board);
+  if (winner === 'X') {
+    return 10 - depth;
+  }
+  if (winner === 'O') {
+    return depth - 10;
+  }
+  if (isBoardFull(board)) {
+    return 0;
+  }
+
+  // X is the maximizing player, O the minimizing one.
+  let bestScore = isMaximizing ? -Infinity : Infinity;
+  const player = isMaximizing ? 'X' : 'O';
+  for (let i = 0; i < board.length; i++) {
+    if (board[i] === null) {
+      board[i] = player;
+      const score = minimax(board, depth + 1, !isMaximizing);
+      board[i] = null; // undo the move
+      bestScore = isMaximizing ? Math.max(bestScore, score) : Math.min(bestScore, score);
+    }
+  }
+  return bestScore;
+}
+
+// Tries every open square for player and returns the one minimax rates best.
+export function findBestMove(squares, player) {
+  const board = squares.slice();
+  // minimax scores favor X, so flip the sign for O: the highest score is then always best for player.
+  const sign = player === 'X' ? 1 : -1;
+  let bestMove = -1;
+  let bestScore = -Infinity;
+  for (let i = 0; i < board.length; i++) {
+    if (board[i] === null) {
+      board[i] = player;
+      const score = sign * minimax(board, 1, player !== 'X');
+      board[i] = null; // undo the move
+      if (score > bestScore) {
+        bestScore = score;
+        bestMove = i;
       }
     }
   }
-  return -1;
-}
-
-// Center first, then corners, then edges.
-const moveOrder = [4, 0, 2, 6, 8, 1, 3, 5, 7];
-
-// Picks player's move: win if possible, otherwise block the opponent, otherwise take the best open square.
-export function findBestMove(squares, player) {
-  const win = findWinningMove(squares, player);
-  if (win !== -1) {
-    return win;
-  }
-  const block = findWinningMove(squares, otherPlayer(player));
-  if (block !== -1) {
-    return block;
-  }
-  return moveOrder.find((i) => squares[i] === null);
+  return bestMove;
 }
