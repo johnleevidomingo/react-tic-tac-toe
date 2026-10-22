@@ -8,16 +8,17 @@ function Square({ value, onSquareClick }) {
   );
 }
 
-function Board({ xIsNext, squares, onPlay }) {
+function Board({ squares, onPlay }) {
   function handleClick(i) {
-    if (calculateWinner(squares) || squares[i]) {
+    if (calculateWinner(squares) || isBoardFull(squares) || squares[i]) {
       return;
     }
     const nextSquares = squares.slice();
-    if (xIsNext) {
-      nextSquares[i] = 'X';
-    } else {
-      nextSquares[i] = 'O';
+    nextSquares[i] = 'X';
+
+    // The computer answers every move by X, unless X just ended the game.
+    if (!calculateWinner(nextSquares) && !isBoardFull(nextSquares)) {
+      nextSquares[findBestMove(nextSquares)] = 'O';
     }
     onPlay(nextSquares);
   }
@@ -26,8 +27,10 @@ function Board({ xIsNext, squares, onPlay }) {
   let status;
   if (winner) {
     status = 'Winner: ' + winner;
+  } else if (isBoardFull(squares)) {
+    status = 'Draw';
   } else {
-    status = 'Next player: ' + (xIsNext ? 'X' : 'O');
+    status = 'Your move (X)';
   }
 
   return (
@@ -53,9 +56,9 @@ function Board({ xIsNext, squares, onPlay }) {
 }
 
 export default function Game() {
+  // Each history entry is the board after one round: your X and the computer's O.
   const [history, setHistory] = useState([Array(9).fill(null)]);
   const [currentMove, setCurrentMove] = useState(0);
-  const xIsNext = currentMove % 2 === 0;
   const currentSquares = history[currentMove];
 
   function handlePlay(nextSquares) {
@@ -90,7 +93,7 @@ export default function Game() {
   return (
     <div className="game">
       <div className="game-board">
-        <Board xIsNext={xIsNext} squares={currentSquares} onPlay={handlePlay} />
+        <Board squares={currentSquares} onPlay={handlePlay} />
       </div>
       <div className="game-info">
         <button onClick={handleReset}>Reset</button>
@@ -104,7 +107,7 @@ export default function Game() {
 // Empty squares are written as '-' so every square takes exactly one character.
 const re = /^(?:(?:...){0,2}([OX])\1\1|.{0,2}([OX])..\2..\2|([OX])...\3...\3|..([OX]).\4.\4)/g;
 
-function calculateWinner(squares) {
+export function calculateWinner(squares) {
   const board = squares.map((square) => square ?? '-').join('');
   // The g flag makes re remember where its last match ended, so reset it before each use.
   re.lastIndex = 0;
@@ -114,4 +117,38 @@ function calculateWinner(squares) {
   }
   // Exactly one of the four capture groups is filled: the winning player.
   return match[1] || match[2] || match[3] || match[4];
+}
+
+function isBoardFull(squares) {
+  return squares.every((square) => square !== null);
+}
+
+// Returns an open square that would win the game for player, or -1 if there is none.
+function findWinningMove(squares, player) {
+  for (let i = 0; i < squares.length; i++) {
+    if (squares[i] === null) {
+      const trial = squares.slice();
+      trial[i] = player;
+      if (calculateWinner(trial) === player) {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
+
+// Center first, then corners, then edges.
+const moveOrder = [4, 0, 2, 6, 8, 1, 3, 5, 7];
+
+// Picks O's move: win if possible, otherwise block X, otherwise take the best open square.
+export function findBestMove(squares) {
+  const win = findWinningMove(squares, 'O');
+  if (win !== -1) {
+    return win;
+  }
+  const block = findWinningMove(squares, 'X');
+  if (block !== -1) {
+    return block;
+  }
+  return moveOrder.find((i) => squares[i] === null);
 }
