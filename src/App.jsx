@@ -1,4 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import {
+  calculateWinner,
+  createBoard,
+  findBestMove,
+  isBoardFull,
+  isGameOver,
+  nextPlayer,
+  otherPlayer,
+  winLength,
+} from './gameLogic';
+
+const MIN_SIZE = 1;
+const MAX_SIZE = 7;
+const AUTOPLAY_DELAY_MS = 400;
 
 function Square({ value, onSquareClick }) {
   return (
@@ -8,26 +22,74 @@ function Square({ value, onSquareClick }) {
   );
 }
 
-function Board({ squares, status, onSquareClick }) {
+function Board({ squares, rows, cols, status, onSquareClick }) {
+  const boardRows = [];
+  for (let row = 0; row < rows; row++) {
+    const rowSquares = [];
+    for (let col = 0; col < cols; col++) {
+      const i = row * cols + col;
+      rowSquares.push(<Square key={i} value={squares[i]} onSquareClick={() => onSquareClick(i)} />);
+    }
+    boardRows.push(
+      <div key={row} className="board-row">
+        {rowSquares}
+      </div>
+    );
+  }
   return (
     <>
       <div className="status">{status}</div>
-      <div className="board-row">
-        <Square value={squares[0]} onSquareClick={() => onSquareClick(0)} />
-        <Square value={squares[1]} onSquareClick={() => onSquareClick(1)} />
-        <Square value={squares[2]} onSquareClick={() => onSquareClick(2)} />
-      </div>
-      <div className="board-row">
-        <Square value={squares[3]} onSquareClick={() => onSquareClick(3)} />
-        <Square value={squares[4]} onSquareClick={() => onSquareClick(4)} />
-        <Square value={squares[5]} onSquareClick={() => onSquareClick(5)} />
-      </div>
-      <div className="board-row">
-        <Square value={squares[6]} onSquareClick={() => onSquareClick(6)} />
-        <Square value={squares[7]} onSquareClick={() => onSquareClick(7)} />
-        <Square value={squares[8]} onSquareClick={() => onSquareClick(8)} />
-      </div>
+      {boardRows}
     </>
+  );
+}
+
+function clampSize(value) {
+  const n = Math.round(Number(value));
+  if (Number.isNaN(n)) {
+    return MIN_SIZE;
+  }
+  return Math.min(MAX_SIZE, Math.max(MIN_SIZE, n));
+}
+
+// Rows and columns inputs. The board only changes when you press the button.
+function BoardSizeForm({ rows, cols, onResize }) {
+  const [draftRows, setDraftRows] = useState(String(rows));
+  const [draftCols, setDraftCols] = useState(String(cols));
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    const nextRows = clampSize(draftRows);
+    const nextCols = clampSize(draftCols);
+    setDraftRows(String(nextRows));
+    setDraftCols(String(nextCols));
+    onResize(nextRows, nextCols);
+  }
+
+  return (
+    <form className="size-form" onSubmit={handleSubmit}>
+      <label>
+        Rows{' '}
+        <input
+          type="number"
+          min={MIN_SIZE}
+          max={MAX_SIZE}
+          value={draftRows}
+          onChange={(event) => setDraftRows(event.target.value)}
+        />
+      </label>
+      <label>
+        Columns{' '}
+        <input
+          type="number"
+          min={MIN_SIZE}
+          max={MAX_SIZE}
+          value={draftCols}
+          onChange={(event) => setDraftCols(event.target.value)}
+        />
+      </label>
+      <button type="submit">New board</button>
+    </form>
   );
 }
 
@@ -40,31 +102,33 @@ function SwitchPlayerButton({ humanPlayer, disabled, onSwitch }) {
 }
 
 export default function Game() {
-  // Each history entry is the board after one of your actions (a move or a switch)
-  // plus the computer's reply.
-  const [history, setHistory] = useState([Array(9).fill(null)]);
+  // Each history entry is a board and its size, after one of your actions (a move or a switch)
+  // plus the computer's reply, or after one computer move while it plays itself.
+  const [history, setHistory] = useState([{ squares: createBoard(3, 3), rows: 3, cols: 3 }]);
   const [currentMove, setCurrentMove] = useState(0);
   // The side you control. The computer always plays the other side.
   const [humanPlayer, setHumanPlayer] = useState('X');
-  const currentSquares = history[currentMove];
-  const gameOver = isGameOver(currentSquares);
+  const [autoPlaying, setAutoPlaying] = useState(false);
+  const { squares: currentSquares, rows, cols } = history[currentMove];
+  const gameOver = isGameOver(currentSquares, rows, cols);
 
   function handlePlay(nextSquares) {
-    const nextHistory = [...history.slice(0, currentMove + 1), nextSquares];
+    const nextHistory = [...history.slice(0, currentMove + 1), { squares: nextSquares, rows, cols }];
     setHistory(nextHistory);
     setCurrentMove(nextHistory.length - 1);
   }
 
   function handleSquareClick(i) {
-    if (gameOver || currentSquares[i]) {
+    if (gameOver || autoPlaying || currentSquares[i]) {
       return;
     }
     const nextSquares = currentSquares.slice();
     nextSquares[i] = humanPlayer;
 
     // The computer answers for the other side, unless your move ended the game.
-    if (!isGameOver(nextSquares)) {
-      nextSquares[findBestMove(nextSquares, otherPlayer(humanPlayer))] = otherPlayer(humanPlayer);
+    if (!isGameOver(nextSquares, rows, cols)) {
+      const computer = otherPlayer(humanPlayer);
+      nextSquares[findBestMove(nextSquares, rows, cols, computer)] = computer;
     }
     handlePlay(nextSquares);
   }
@@ -75,34 +139,73 @@ export default function Game() {
       return;
     }
     const nextSquares = currentSquares.slice();
-    nextSquares[findBestMove(nextSquares, humanPlayer)] = humanPlayer;
+    nextSquares[findBestMove(nextSquares, rows, cols, humanPlayer)] = humanPlayer;
     setHumanPlayer(otherPlayer(humanPlayer));
     handlePlay(nextSquares);
   }
 
+  // While autoplay is on, the computer makes one move for whoever is next every AUTOPLAY_DELAY_MS.
+  useEffect(() => {
+    if (!autoPlaying) {
+      return;
+    }
+    if (gameOver) {
+      setAutoPlaying(false);
+      setHumanPlayer(nextPlayer(currentSquares));
+      return;
+    }
+    const timer = setTimeout(() => {
+      const player = nextPlayer(currentSquares);
+      const nextSquares = currentSquares.slice();
+      nextSquares[findBestMove(nextSquares, rows, cols, player)] = player;
+      handlePlay(nextSquares);
+    }, AUTOPLAY_DELAY_MS);
+    return () => clearTimeout(timer);
+  });
+
+  function toggleAutoPlay() {
+    if (autoPlaying) {
+      // Stopping hands you whichever side is due to move.
+      setHumanPlayer(nextPlayer(currentSquares));
+    }
+    setAutoPlaying(!autoPlaying);
+  }
+
+  // Changing the board size starts a new game on the new board.
+  function handleResize(nextRows, nextCols) {
+    setHistory([{ squares: createBoard(nextRows, nextCols), rows: nextRows, cols: nextCols }]);
+    setCurrentMove(0);
+    setHumanPlayer('X');
+    setAutoPlaying(false);
+  }
+
   function jumpTo(nextMove) {
     setCurrentMove(nextMove);
+    setAutoPlaying(false);
     // After time travel you control whichever side is due to move.
-    setHumanPlayer(nextPlayer(history[nextMove]));
+    setHumanPlayer(nextPlayer(history[nextMove].squares));
   }
 
   function handleReset() {
-    setHistory([Array(9).fill(null)]);
+    setHistory([{ squares: createBoard(rows, cols), rows, cols }]);
     setCurrentMove(0);
     setHumanPlayer('X');
+    setAutoPlaying(false);
   }
 
-  const winner = calculateWinner(currentSquares);
+  const winner = calculateWinner(currentSquares, rows, cols);
   let status;
   if (winner) {
     status = 'Winner: ' + winner;
   } else if (isBoardFull(currentSquares)) {
     status = 'Draw';
+  } else if (autoPlaying) {
+    status = 'Computer is playing ' + nextPlayer(currentSquares);
   } else {
     status = 'Your move (' + humanPlayer + ')';
   }
 
-  const moves = history.map((squares, move) => {
+  const moves = history.map((entry, move) => {
     let description;
     if (move > 0) {
       description = 'Go to move #' + move;
@@ -119,99 +222,32 @@ export default function Game() {
   return (
     <div className="game">
       <div className="game-board">
-        <Board squares={currentSquares} status={status} onSquareClick={handleSquareClick} />
+        <Board
+          squares={currentSquares}
+          rows={rows}
+          cols={cols}
+          status={status}
+          onSquareClick={handleSquareClick}
+        />
       </div>
       <div className="game-info">
+        <BoardSizeForm rows={rows} cols={cols} onResize={handleResize} />
+        <p className="rule">
+          {rows} × {cols} board: {winLength(rows, cols)} in a row wins.
+        </p>
         <div className="controls">
           <button onClick={handleReset}>Reset</button>
-          <SwitchPlayerButton humanPlayer={humanPlayer} disabled={gameOver} onSwitch={handleSwitch} />
+          <SwitchPlayerButton
+            humanPlayer={humanPlayer}
+            disabled={gameOver || autoPlaying}
+            onSwitch={handleSwitch}
+          />
+          <button onClick={toggleAutoPlay} disabled={gameOver && !autoPlaying}>
+            {autoPlaying ? 'Stop' : 'Computer plays itself'}
+          </button>
         </div>
         <ol>{moves}</ol>
       </div>
     </div>
   );
-}
-
-// Matches any win in the 9-character board string (rows, columns, both diagonals).
-// Empty squares are written as '-' so every square takes exactly one character.
-const re = /^(?:(?:...){0,2}([OX])\1\1|.{0,2}([OX])..\2..\2|([OX])...\3...\3|..([OX]).\4.\4)/g;
-
-export function calculateWinner(squares) {
-  const board = squares.map((square) => square ?? '-').join('');
-  // The g flag makes re remember where its last match ended, so reset it before each use.
-  re.lastIndex = 0;
-  const match = re.exec(board);
-  if (!match) {
-    return null;
-  }
-  // Exactly one of the four capture groups is filled: the winning player.
-  return match[1] || match[2] || match[3] || match[4];
-}
-
-function isBoardFull(squares) {
-  return squares.every((square) => square !== null);
-}
-
-export function isGameOver(squares) {
-  return calculateWinner(squares) !== null || isBoardFull(squares);
-}
-
-export function otherPlayer(player) {
-  return player === 'X' ? 'O' : 'X';
-}
-
-// X always moves first, so it is X's turn whenever both sides have the same number of marks.
-export function nextPlayer(squares) {
-  const xCount = squares.filter((square) => square === 'X').length;
-  const oCount = squares.filter((square) => square === 'O').length;
-  return xCount === oCount ? 'X' : 'O';
-}
-
-// Scores a board from X's point of view: positive means X wins, negative means O wins, 0 is a draw.
-// Faster wins (smaller depth) score higher, so the computer finishes a won game instead of stalling.
-export function minimax(board, depth, isMaximizing) {
-  const winner = calculateWinner(board);
-  if (winner === 'X') {
-    return 10 - depth;
-  }
-  if (winner === 'O') {
-    return depth - 10;
-  }
-  if (isBoardFull(board)) {
-    return 0;
-  }
-
-  // X is the maximizing player, O the minimizing one.
-  let bestScore = isMaximizing ? -Infinity : Infinity;
-  const player = isMaximizing ? 'X' : 'O';
-  for (let i = 0; i < board.length; i++) {
-    if (board[i] === null) {
-      board[i] = player;
-      const score = minimax(board, depth + 1, !isMaximizing);
-      board[i] = null; // undo the move
-      bestScore = isMaximizing ? Math.max(bestScore, score) : Math.min(bestScore, score);
-    }
-  }
-  return bestScore;
-}
-
-// Tries every open square for player and returns the one minimax rates best.
-export function findBestMove(squares, player) {
-  const board = squares.slice();
-  // minimax scores favor X, so flip the sign for O: the highest score is then always best for player.
-  const sign = player === 'X' ? 1 : -1;
-  let bestMove = -1;
-  let bestScore = -Infinity;
-  for (let i = 0; i < board.length; i++) {
-    if (board[i] === null) {
-      board[i] = player;
-      const score = sign * minimax(board, 1, player !== 'X');
-      board[i] = null; // undo the move
-      if (score > bestScore) {
-        bestScore = score;
-        bestMove = i;
-      }
-    }
-  }
-  return bestMove;
 }

@@ -46,3 +46,18 @@ body {
   display: flex;
   gap: 8px;
 }
+
+.size-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.size-form input {
+  width: 3.5em;
+}
+
+.rule {
+  margin: 8px 0;
+}

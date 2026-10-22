@@ -15,7 +15,7 @@ The [React tic-tac-toe tutorial](https://react.dev/learn/tutorial-tic-tac-toe) (
 | `challenge-6` | Adjustable board size (rows × columns), win = min(rows, cols) in a row |
 | `challenge-7` | Board size can be changed mid-game; pieces keep their row/column |
 
-Each branch builds on the one before it.
+Each branch builds on the one before it. From `challenge-6` on, the game rules and computer player live in `src/gameLogic.js`.
 
 ## Running
 
